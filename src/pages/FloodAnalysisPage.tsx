@@ -51,6 +51,8 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ language }
 
   const [submitted, setSubmitted] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<any>(null);
 
   // Handle Location Search (using Nominatim OpenStreetMap geocoder)
   const handleSearch = async (e: React.FormEvent) => {
@@ -99,20 +101,50 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ language }
     }
   };
 
-  const handleStartAnalysis = (e: React.FormEvent) => {
+  const handleStartAnalysis = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
+    setIsAnalyzing(true);
 
     if (!analysisForm.eventDate) {
       setFormError('Please specify a valid event date.');
+      setIsAnalyzing(false);
       return;
     }
     if (!analysisForm.aoi) {
       setFormError('Please select a valid Area of Interest (AOI).');
+      setIsAnalyzing(false);
       return;
     }
 
-    setSubmitted(true);
+    try {
+      const response = await fetch('http://localhost:5000/api/analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(analysisForm)
+      });
+
+      if (!response.ok) {
+        throw new Error('Backend API request failed.');
+      }
+
+      const result = await response.json();
+      setAnalysisResult(result);
+      setSubmitted(true);
+    } catch (err: any) {
+      // Fallback if backend server is not running
+      setAnalysisResult({
+        message: 'Backend API offline — using offline simulation mode.',
+        data: {
+          discoveredScenes: [
+            { provider: 'Copernicus Sentinel Hub (Offline Mode)', sceneId: 'S1A_SIMULATED_SCENE_01', acquisitionDate: new Date().toISOString() }
+          ]
+        }
+      });
+      setSubmitted(true);
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   const handleReset = () => {
