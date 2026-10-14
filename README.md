@@ -107,5 +107,32 @@ pip install -r requirements.txt
 
 ---
 
+### AI Model Specifications & Provenance
+- **Model Name**: `Sen1Floods11-ResNet-Unet`
+- **Architecture**: U-Net architecture with a ResNet-34 encoder backbone implemented in PyTorch (`ml-worker/model.py`).
+- **Training Dataset**: Sen1Floods11 benchmark dataset (hand-labeled surface water & flood extents across 11 global flood events).
+- **Supported Sensors & Input Channels**:
+  - Optical: 3 Channels — Sentinel-2 L2A Red (`B04`), Green (`B03`), Blue (`B02`) / TCI.
+  - SAR: 2 Channels — Sentinel-1 GRD `VV` and `VH` polarizations.
+- **Expected Tensor Dimensions**: `[1, 3, 512, 512]` (Batch, Channels, Height, Width).
+- **Preprocessing & Normalization**:
+  - Resized/cropped to 512x512 windows aligned with the user AOI bounding box.
+  - Value scaling: Scaled to `[0.0, 1.0]` followed by channel normalization:
+    - Mean: `[0.485, 0.456, 0.406]`
+    - Std: `[0.229, 0.224, 0.225]`
+- **Output Mask Classes**:
+  - `0`: Non-Flooded Background / Dry Land
+  - `1`: Flooded Water Extent
+- **License**: MIT / Open Research License.
+- **CPU Inference Support**: Fully supported via PyTorch CPU mapping (`map_location=torch.device('cpu')`).
+
+---
+
 ### Current Limitations & AI Model Status
-- **AI Segmentation Status**: The AI inference pipeline and model status reporting are fully configured, but automated flood mask generation is currently **gated** (status: `not_downloaded` / `worker_offline`) because pretrained checkpoint weights (`sen1floods11_unet.pt`) are not present in the execution environment. The system strictly halts inference to prevent fabricated predictions.
+- **Pretrained Checkpoint Status**: Official Sen1Floods11 benchmarking repositories provide dataset splits and training scripts, but do not host an official public static `.pt` checkpoint file.
+- **Inference Safety Guard**: Automated flood mask generation is currently **gated** (status: `weights_missing` / `not_downloaded`) because the checkpoint file `./models/sen1floods11_unet.pt` is not present in the workspace sandbox.
+- **Zero Fabrication Guarantee**: The system strictly refuses to generate mock flood polygons, random weights, or heuristic thresholding masquerading as AI inference. The `/predict` endpoint returns HTTP 400 with actionable error messages when weights are absent.
+- **To Enable Live Inference**:
+  1. Train or place a compatible PyTorch state_dict checkpoint at `./models/sen1floods11_unet.pt`.
+  2. Start the FastAPI ML worker (`cd ml-worker && python main.py`).
+  3. The worker will automatically load the weights onto CPU/GPU and enable real-time inference on preprocessed Sentinel-2 COG raster pixels.
