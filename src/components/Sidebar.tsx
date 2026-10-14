@@ -25,6 +25,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ language, setLanguage }) => {
   const location = useLocation();
   const t = translations[language];
   const [backendConnected, setBackendConnected] = useState<boolean>(false);
+  const [dbStatus, setDbStatus] = useState<string>('disconnected');
 
   useEffect(() => {
     let isMounted = true;
@@ -33,12 +34,21 @@ export const Sidebar: React.FC<SidebarProps> = ({ language, setLanguage }) => {
         const res = await fetch('/api/health');
         if (res.ok) {
           const data = await res.json();
-          if (isMounted) setBackendConnected(data.status === 'ok');
+          if (isMounted) {
+            setBackendConnected(data.status === 'ok');
+            setDbStatus(data.database || 'disconnected');
+          }
         } else {
-          if (isMounted) setBackendConnected(false);
+          if (isMounted) {
+            setBackendConnected(false);
+            setDbStatus('disconnected');
+          }
         }
       } catch {
-        if (isMounted) setBackendConnected(false);
+        if (isMounted) {
+          setBackendConnected(false);
+          setDbStatus('connection_error');
+        }
       }
     };
 
@@ -126,23 +136,35 @@ export const Sidebar: React.FC<SidebarProps> = ({ language, setLanguage }) => {
       </nav>
 
       {/* System Status Footer */}
-      <div className="p-3 border-t border-slate-800 bg-dark-950/60 text-xs">
-        <div className="flex items-center justify-between mb-1.5">
+      <div className="p-3 border-t border-slate-800 bg-dark-950/60 text-xs space-y-2">
+        <div className="flex items-center justify-between">
           <span className="text-slate-400 flex items-center gap-1.5">
             <span className={`w-2 h-2 rounded-full ${backendConnected ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
             Backend API
           </span>
-          <span className={`text-[11px] font-mono px-1.5 py-0.5 rounded border ${
+          <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
             backendConnected
               ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
               : 'text-amber-400 bg-amber-500/10 border-amber-500/20'
           }`}>
-            {backendConnected ? translations[language].statusConnected : translations[language].statusNotConnected}
+            {backendConnected ? 'Online' : 'Offline'}
           </span>
         </div>
-        <p className="text-[11px] text-slate-500 leading-tight">
-          {backendConnected ? 'REST API & STAC Engine Active' : 'Phase 1 Frontend • Standalone GIS Workspace'}
-        </p>
+        <div className="flex items-center justify-between">
+          <span className="text-slate-400 flex items-center gap-1.5">
+            <span className={`w-2 h-2 rounded-full ${dbStatus === 'connected' ? 'bg-emerald-500' : dbStatus === 'connecting' ? 'bg-blue-500 animate-pulse' : 'bg-amber-500'}`} />
+            Database
+          </span>
+          <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+            dbStatus === 'connected'
+              ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+              : dbStatus === 'connecting'
+              ? 'text-blue-400 bg-blue-500/10 border-blue-500/20'
+              : 'text-amber-400 bg-amber-500/10 border-amber-500/20'
+          }`}>
+            {dbStatus === 'connected' ? 'Connected' : dbStatus === 'connecting' ? 'Connecting' : 'Disconnected'}
+          </span>
+        </div>
       </div>
     </aside>
   );
