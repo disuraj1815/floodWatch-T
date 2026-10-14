@@ -118,7 +118,7 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ language }
     }
 
     try {
-      const response = await fetch('http://localhost:5000/api/analysis', {
+      const response = await fetch('/api/analysis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(analysisForm)

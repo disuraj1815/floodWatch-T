@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -24,6 +24,31 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ language, setLanguage }) => {
   const location = useLocation();
   const t = translations[language];
+  const [backendConnected, setBackendConnected] = useState<boolean>(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    const checkHealth = async () => {
+      try {
+        const res = await fetch('/api/health');
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted) setBackendConnected(data.status === 'ok');
+        } else {
+          if (isMounted) setBackendConnected(false);
+        }
+      } catch {
+        if (isMounted) setBackendConnected(false);
+      }
+    };
+
+    checkHealth();
+    const interval = setInterval(checkHealth, 10000); // Poll every 10s
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   const navItems = [
     { path: '/', label: t.dashboard, icon: LayoutDashboard },
@@ -104,15 +129,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ language, setLanguage }) => {
       <div className="p-3 border-t border-slate-800 bg-dark-950/60 text-xs">
         <div className="flex items-center justify-between mb-1.5">
           <span className="text-slate-400 flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+            <span className={`w-2 h-2 rounded-full ${backendConnected ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
             Backend API
           </span>
-          <span className="text-[11px] font-mono text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
-            {translations[language].statusNotConnected}
+          <span className={`text-[11px] font-mono px-1.5 py-0.5 rounded border ${
+            backendConnected
+              ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+              : 'text-amber-400 bg-amber-500/10 border-amber-500/20'
+          }`}>
+            {backendConnected ? translations[language].statusConnected : translations[language].statusNotConnected}
           </span>
         </div>
         <p className="text-[11px] text-slate-500 leading-tight">
-          Phase 1 Frontend • Standalone GIS Workspace
+          {backendConnected ? 'REST API & STAC Engine Active' : 'Phase 1 Frontend • Standalone GIS Workspace'}
         </p>
       </div>
     </aside>
