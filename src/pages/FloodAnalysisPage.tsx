@@ -126,31 +126,53 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ language }
       return;
     }
 
-    try {
-      const response = await fetch('/api/analysis', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(analysisForm)
-      });
+    // Validate the dates and AOI before calling the real backend.
+    if (analysisForm.beforeDateStart && analysisForm.beforeDateEnd && analysisForm.beforeDateStart > analysisForm.beforeDateEnd) {
+      setFormError('Before-event start date must be on or before its end date.');
+      setIsAnalyzing(false);
+      return;
+    }
+    if (analysisForm.afterDateStart && analysisForm.afterDateEnd && analysisForm.afterDateStart > analysisForm.afterDateEnd) {
+      setFormError('After-event start date must be on or before its end date.');
+      setIsAnalyzing(false);
+      return;
+    }
+    if (aoi.minLat >= aoi.maxLat || aoi.minLng >= aoi.maxLng || aoi.minLat < -90 || aoi.maxLat > 90 || aoi.minLng < -180 || aoi.maxLng > 180) {
+      setFormError('AOI bounds are invalid. Please search for a location or reset the AOI.');
+      setIsAnalyzing(false);
+      return;
+    }
 
-      if (!response.ok) {
-        throw new Error('Backend API request failed.');
+    try {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 60000);
+      let response: Response;
+      try {
+        response = await fetch('/api/analysis', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ ...analysisForm, aoi }),
+          signal: controller.signal
+        });
+      } finally {
+        window.clearTimeout(timeout);
       }
 
-      const result = await response.json();
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result?.error || result?.message || `Backend request failed (HTTP ${response.status}).`);
+      }
+      if (!result || !result.analysisId || !result.data) {
+        throw new Error('Backend returned an unexpected response. Check the backend logs and API contract.');
+      }
+
       setAnalysisResult(result);
       setSubmitted(true);
-    } catch (err: any) {
-      // Fallback if backend server is not running
-      setAnalysisResult({
-        message: 'Backend API offline — using offline simulation mode.',
-        data: {
-          discoveredScenes: [
-            { provider: 'Copernicus Sentinel Hub (Offline Mode)', sceneId: 'S1A_SIMULATED_SCENE_01', acquisitionDate: new Date().toISOString() }
-          ]
-        }
-      });
-      setSubmitted(true);
+    } catch (err: unknown) {
+      const message = err instanceof Error
+        ? (err.name === 'AbortError' ? 'Analysis request timed out after 60 seconds. Check backend and satellite API status.' : err.message)
+        : 'Unable to contact the backend. Check that the backend is running on port 5000.';
+      setFormError(`${message} No simulated or fabricated results were created.`);
     } finally {
       setIsAnalyzing(false);
     }
@@ -238,16 +260,23 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ language }
                 <CheckCircle2 className="w-10 h-10 text-cyan-400 mx-auto" />
                 <h3 className="font-semibold text-slate-100 text-base">Analysis Request Prepared</h3>
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  The analysis request for <strong className="text-cyan-400">{analysisForm.locationName}</strong> with AOI bounds has been successfully validated.
+                  Backend accepted the analysis request for <strong className="text-cyan-400">{analysisForm.locationName}</strong>.
                 </p>
-                <div className="bg-dark-950 p-3 rounded text-left font-mono text-[11px] text-slate-400 space-y-1">
+                <div className="bg-dark-950 p-3 rounded text-left font-mono text-[11px] text-slate-400 space-y-1 break-words">
+                  <div>Analysis ID: <span className="text-slate-200">{analysisResult?.analysisId || 'Unavailable'}</span></div>
                   <div>Sensor: <span className="text-slate-200">{analysisForm.sensor}</span></div>
                   <div>Event Date: <span className="text-slate-200">{analysisForm.eventDate}</span></div>
                   <div>Center: <span className="text-slate-200">{aoi.center[0].toFixed(4)}, {aoi.center[1].toFixed(4)}</span></div>
+                  <div>Satellite scenes found: <span className="text-slate-200">{analysisResult?.data?.discoveredScenes?.length ?? 0}</span></div>
                 </div>
-                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded text-amber-300 text-xs">
-                  <strong>Backend Status:</strong> Node.js / MongoDB backend not connected. Real-time satellite inference awaits Phase 2 integration.
+                <div className={`p-3 rounded text-xs border ${(analysisResult?.data?.discoveredScenes?.length ?? 0) > 0 ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-200' : 'bg-amber-500/10 border-amber-500/30 text-amber-300'}`}>
+                  <strong>Backend result:</strong> {analysisResult?.message || 'Analysis request completed; inspect returned data for details.'}
                 </div>
+                {analysisResult?.data?.aiInference?.message && (
+                  <div className="p-3 bg-dark-950 border border-slate-800 rounded text-left text-xs text-slate-300">
+                    <strong>AI status:</strong> {analysisResult.data.aiInference.message}
+                  </div>
+                )}
                 <button
                   onClick={handleReset}
                   className="w-full py-2 bg-dark-800 hover:bg-dark-700 text-slate-200 border border-slate-700 rounded-lg text-sm font-medium transition-all"
@@ -348,10 +377,11 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ language }
                 <div className="pt-2 flex gap-3">
                   <button
                     type="submit"
-                    className="flex-1 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-dark-950 font-semibold text-sm flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/20 transition-all"
+                    disabled={isAnalyzing}
+                    className="flex-1 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-dark-950 font-semibold text-sm flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    <Play className="w-4 h-4 fill-current" />
-                    Start Analysis
+                    {isAnalyzing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
+                    {isAnalyzing ? 'Analyzing…' : 'Start Analysis'}
                   </button>
                   <button
                     type="button"
@@ -361,6 +391,10 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ language }
                         center: [27.9100, 85.1500], zoom: 11, name: 'Trishuli Valley AOI-01'
                       });
                       setMapCenter([27.9100, 85.1500]);
+                      setAnalysisForm(prev => ({ ...prev, aoi: {
+                        minLat: 27.8500, maxLat: 27.9700, minLng: 85.0800, maxLng: 85.2200,
+                        center: [27.9100, 85.1500], zoom: 11, name: 'Trishuli Valley AOI-01'
+                      }}));
                     }}
                     className="px-4 py-2.5 rounded-lg bg-dark-800 hover:bg-dark-700 text-slate-300 border border-slate-700 text-sm font-medium transition-all"
                   >

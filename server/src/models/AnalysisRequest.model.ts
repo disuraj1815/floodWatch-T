@@ -22,7 +22,7 @@ export interface IAnalysisRequest extends Document {
     provider: string;
     collection: string;
     sceneId: string;
-    acquisitionDate: Date;
+    acquisitionDate: string | Date;
     cloudCover?: number;
     assetUrl?: string;
   }>;
@@ -52,10 +52,20 @@ const AnalysisRequestSchema: Schema = new Schema({
     provider: String,
     collection: String,
     sceneId: String,
-    acquisitionDate: Date,
+    acquisitionDate: String,
     cloudCover: Number,
+    bbox: [Number],
+    assets: { type: Schema.Types.Mixed },
+    orbitState: String,
+    polarization: String,
     assetUrl: String
-  }]
+  }],
+  rasterInspection: { type: Schema.Types.Mixed },
+  preprocessing: { type: Schema.Types.Mixed },
+  aiModelStatus: { type: Schema.Types.Mixed },
+  aiInference: { type: Schema.Types.Mixed },
+  osmInfrastructure: { type: Schema.Types.Mixed },
+  roadConnectivity: { type: Schema.Types.Mixed }
 }, { timestamps: true, suppressReservedKeysWarning: true });
 
 export const AnalysisRequestModel = mongoose.models.AnalysisRequest || mongoose.model<IAnalysisRequest>('AnalysisRequest', AnalysisRequestSchema);

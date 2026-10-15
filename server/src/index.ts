@@ -10,7 +10,8 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
+const allowedOrigins = (process.env.FRONTEND_ORIGIN || 'http://localhost:3000').split(',').map(origin => origin.trim()).filter(Boolean);
+app.use(cors({ origin: allowedOrigins }));
 app.use(express.json());
 
 // Database connection attempt
