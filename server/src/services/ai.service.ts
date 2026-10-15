@@ -17,8 +17,8 @@ export const checkAIModelAvailability = async (): Promise<AIModelStatus> => {
     const response = await fetch(`${ML_WORKER_URL}/model/status`, {
       method: 'GET',
       headers: { 'Accept': 'application/json' },
-      timeout: 3000
-    } as any);
+      signal: AbortSignal.timeout(3000)
+    });
 
     if (!response.ok) {
       return {
@@ -71,7 +71,7 @@ export interface AIInferenceResult {
 export const runAIInferencePipeline = async (sceneId: string, aoi: any, assetHref?: string): Promise<AIInferenceResult> => {
   const modelStatus = await checkAIModelAvailability();
 
-  if (!modelStatus.weightsAvailable || modelStatus.status === 'worker_offline') {
+  if (!modelStatus.weightsAvailable || modelStatus.status !== 'ready') {
     return {
       aiModelAvailability: modelStatus.status === 'worker_offline' ? 'worker_offline' : 'not_downloaded',
       aiInference: 'skipped',
@@ -87,8 +87,8 @@ export const runAIInferencePipeline = async (sceneId: string, aoi: any, assetHre
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sceneId, assetHref: assetHref || '', aoi }),
-      timeout: 15000
-    } as any);
+      signal: AbortSignal.timeout(15000)
+    });
 
     if (!response.ok) {
       return {
@@ -102,13 +102,32 @@ export const runAIInferencePipeline = async (sceneId: string, aoi: any, assetHre
     }
 
     const result: any = await response.json();
+    const inferenceCompleted = result?.inference === 'completed';
+    const maskCompleted = result?.maskGeneration === 'completed' && typeof result?.floodFraction === 'number';
+    let floodAreaSqKm: number | null = null;
+    if (maskCompleted && Number.isFinite(result.floodFraction) && aoi &&
+        Number.isFinite(aoi.minLat) && Number.isFinite(aoi.maxLat) &&
+        Number.isFinite(aoi.minLng) && Number.isFinite(aoi.maxLng) &&
+        aoi.minLat < aoi.maxLat && aoi.minLng < aoi.maxLng) {
+      // Approximate AOI surface area on a spherical Earth, then apply the model's measured mask fraction.
+      const earthRadiusKm = 6371.0088;
+      const toRad = (degrees: number) => degrees * Math.PI / 180;
+      const areaKm2 = earthRadiusKm * earthRadiusKm *
+        Math.abs(toRad(aoi.maxLng - aoi.minLng)) *
+        Math.abs(Math.sin(toRad(aoi.maxLat)) - Math.sin(toRad(aoi.minLat)));
+      if (Number.isFinite(areaKm2) && result.floodFraction >= 0 && result.floodFraction <= 1) {
+        floodAreaSqKm = Number((areaKm2 * result.floodFraction).toFixed(4));
+      }
+    }
     return {
       aiModelAvailability: 'ready',
-      aiInference: 'completed',
-      floodMaskGeneration: 'completed',
-      confidenceScores: result.confidenceScores || [0.94, 0.91],
-      floodAreaSqKm: result.floodAreaSqKm || 4.82,
-      message: result.message || 'Genuine model inference executed successfully via Python worker.'
+      aiInference: inferenceCompleted ? 'completed' : 'failed',
+      floodMaskGeneration: maskCompleted ? 'completed' : 'failed',
+      confidenceScores: null,
+      floodAreaSqKm,
+      message: inferenceCompleted && maskCompleted
+        ? `Model inference completed. Flood fraction: ${(result.floodFraction * 100).toFixed(2)}%. Flood area is an AOI-based estimate; review mask and input quality before operational use.`
+        : `Worker did not confirm a valid completed inference and georeferenced mask. Details: ${(result?.messages || []).join('; ') || 'No valid mask statistics returned.'}`
     };
   } catch (error: any) {
     return {

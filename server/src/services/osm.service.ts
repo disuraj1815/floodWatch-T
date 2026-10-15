@@ -22,17 +22,15 @@ export const fetchOSMInfrastructure = async (aoi: { minLat: number; maxLat: numb
         node["bridge"](${aoi.minLat},${aoi.minLng},${aoi.maxLat},${aoi.maxLng});
         way["bridge"](${aoi.minLat},${aoi.minLng},${aoi.maxLat},${aoi.maxLng});
       );
-      out body;
-      >;
-      out skel qt;
+      out center tags;
     `;
 
     const response = await fetch(OVERPASS_API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain', 'User-Agent': 'FloodWatch-GIS-Platform/1.0' },
       body: query,
-      timeout: 12000
-    } as any);
+      signal: AbortSignal.timeout(12000)
+    });
 
     if (!response.ok) {
       console.warn(`Overpass API returned status ${response.status}: ${response.statusText}`);
@@ -47,9 +45,9 @@ export const fetchOSMInfrastructure = async (aoi: { minLat: number; maxLat: numb
     const features: OSMFeature[] = [];
     for (const el of data.elements) {
       if (!el.tags) continue;
-      const lat = el.lat || (el.center && el.center.lat);
-      const lng = el.lon || (el.center && el.center.lon);
-      if (!lat || !lng) continue;
+      const lat = el.lat ?? el.center?.lat;
+      const lng = el.lon ?? el.center?.lon;
+      if (lat === undefined || lat === null || lng === undefined || lng === null) continue;
 
       let type: OSMFeature['type'] = 'Road Segment';
       if (el.tags.bridge === 'yes' || el.tags.man_made === 'bridge') {

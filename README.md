@@ -102,3 +102,17 @@ Then open your browser to **http://localhost:3000**.
 - `DEMO_SCRIPT.md` — 3-minute video presentation guide.
 - `TESTING_CHECKLIST.md` — Step-by-step verification instructions.
 - `DATA_SOURCES.md` — Attribution and licensing documentation.
+
+
+## Integration and result-integrity notes
+
+- The analysis form calls the real `POST /api/analysis` endpoint through the Vite `/api` proxy. Backend/network failures are shown as errors; no simulated satellite scene is created on failure.
+- AI inference is only attempted when the worker reports a ready model and a compatible RGB/TCI asset is present. Missing model weights, unsupported assets, or failed inference remain unavailable rather than being replaced with fabricated metrics.
+- Confidence scores are not emitted because the current worker does not calculate calibrated confidence scores. Flood-area estimates are only returned when the worker reports a completed mask and valid flood fraction; the area is an AOI-based estimate, not independent ground truth.
+- Infrastructure impacts and cut-off settlements are not claimed as verified until feature-to-mask spatial intersection and real road-graph reachability are implemented.
+- External STAC, OSM, MongoDB, and ML-worker behavior still depends on network access, provider availability, environment configuration, and a compatible model checkpoint.
+
+
+## Which frontend is active?
+
+When commands are run from the repository root, Vite uses the root `src/` directory and root `vite.config.ts`. The nested `fw/` directory contains a separate/older frontend copy and is not used by the root scripts. Start the app from the repository root unless you intentionally maintain that nested copy.

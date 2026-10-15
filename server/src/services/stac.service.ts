@@ -24,15 +24,20 @@ export const searchStacScenes = async (query: StacSearchQuery): Promise<Satellit
   try {
     // Copernicus Data Space collections for Sentinel-2 L2A and Sentinel-1 GRD
     const collections = query.collections || ['sentinel-2-l2a', 'sentinel-1-grd'];
+    const isEarthSearchPrimary = COPERNICUS_STAC_URL.includes('earth-search.aws.element84.com');
+    const providerCollections = isEarthSearchPrimary
+      ? collections
+      : collections.map(collection => collection.toLowerCase().includes('sentinel-1') ? 'SENTINEL-1' : 'SENTINEL-2');
     const payload = {
       bbox: query.bbox,
       datetime: query.datetime,
-      collections,
+      collections: providerCollections,
       limit: query.limit || 10
     };
 
-    console.log(`Querying Copernicus Data Space STAC API: ${COPERNICUS_STAC_URL}/search`, payload);
+    console.log(`Querying primary STAC API: ${COPERNICUS_STAC_URL}/search`, { ...payload, collections: providerCollections });
 
+    let responseProvider = COPERNICUS_STAC_URL.includes('earth-search') ? 'AWS Earth Search (STAC API)' : 'Copernicus Data Space Ecosystem (STAC API)';
     let response = await fetch(`${COPERNICUS_STAC_URL}/search`, {
       method: 'POST',
       headers: {
@@ -40,17 +45,20 @@ export const searchStacScenes = async (query: StacSearchQuery): Promise<Satellit
         'Accept': 'application/json',
         'User-Agent': 'FloodWatch-GIS-Platform/1.0'
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(20000)
     });
 
     // If Copernicus STAC is unreachable or rate-limited, fallback gracefully to AWS Earth Search STAC
-    if (!response.ok) {
-      console.warn(`Copernicus STAC API status ${response.status}. Falling back to AWS Earth Search STAC...`);
+    if (!response.ok && !COPERNICUS_STAC_URL.includes('earth-search.aws.element84.com')) {
+      console.warn(`Primary STAC API status ${response.status}. Falling back to AWS Earth Search STAC...`);
       const fallbackUrl = 'https://earth-search.aws.element84.com/v1/search';
+      responseProvider = 'AWS Earth Search (STAC API)';
       response = await fetch(fallbackUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ ...payload, collections }),
+        signal: AbortSignal.timeout(20000)
       });
     }
 
@@ -66,12 +74,12 @@ export const searchStacScenes = async (query: StacSearchQuery): Promise<Satellit
 
     return data.features.map((feature: any) => {
       const collection = feature.collection || 'unknown';
-      const isSentinel1 = collection.includes('sentinel-1');
+      const isSentinel1 = collection.toLowerCase().includes('sentinel-1');
       return {
-        provider: 'Copernicus Data Space Ecosystem (STAC API)',
+        provider: responseProvider,
         collection,
         sceneId: feature.id,
-        acquisitionDate: feature.properties?.datetime || new Date().toISOString(),
+        acquisitionDate: feature.properties?.datetime || feature.properties?.['start_datetime'] || '',
         cloudCover: feature.properties?.['eo:cloud_cover'] ?? feature.properties?.cloud_cover,
         bbox: feature.bbox,
         assets: feature.assets || {},

@@ -4,3 +4,13 @@ dist/
 .env
 .env.local
 .claude/worktrees/
+
+# Python cache and virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Environment secrets
+.env.*
+!.env.example

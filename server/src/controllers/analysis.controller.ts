@@ -40,17 +40,36 @@ export const createAnalysis = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Invalid or missing AOI geometry coordinates.' });
     }
 
-    if (!eventDate) {
-      return res.status(400).json({ error: 'Event date is required.' });
+    if (!eventDate || Number.isNaN(Date.parse(eventDate))) {
+      return res.status(400).json({ error: 'A valid event date is required.' });
+    }
+    const validDate = (value: unknown): value is string => typeof value === 'string' && !Number.isNaN(Date.parse(value));
+    if ((beforeDateStart && !validDate(beforeDateStart)) || (beforeDateEnd && !validDate(beforeDateEnd)) ||
+        (afterDateStart && !validDate(afterDateStart)) || (afterDateEnd && !validDate(afterDateEnd))) {
+      return res.status(400).json({ error: 'One or more before/after date values are invalid.' });
+    }
+    if (aoi.minLat >= aoi.maxLat || aoi.minLng >= aoi.maxLng || aoi.minLat < -90 || aoi.maxLat > 90 || aoi.minLng < -180 || aoi.maxLng > 180) {
+      return res.status(400).json({ error: 'AOI bounds are invalid.' });
+    }
+    const beforeStart = beforeDateStart || '2026-08-01';
+    const afterEnd = afterDateEnd || '2026-08-20';
+    if (beforeStart > afterEnd) {
+      return res.status(400).json({ error: 'The overall satellite search start date must be on or before the end date.' });
     }
 
-    // Format datetime string for STAC query: [minLng, minLat, maxLng, maxLat]
+    // STAC bbox order is [minLng, minLat, maxLng, maxLat].
     const bbox: [number, number, number, number] = [aoi.minLng, aoi.minLat, aoi.maxLng, aoi.maxLat];
-    const datetime = `${beforeDateStart || '2026-08-01'}T00:00:00Z/${afterDateEnd || '2026-08-20'}T23:59:59Z`;
+    const datetime = `${beforeStart}T00:00:00Z/${afterEnd}T23:59:59Z`;
+    const sensorCollections: Record<string, string[]> = {
+      'sentinel-1': ['sentinel-1-grd'],
+      'sentinel-2': ['sentinel-2-l2a'],
+      both: ['sentinel-1-grd', 'sentinel-2-l2a']
+    };
+    const collections = sensorCollections[sensor] || sensorCollections.both;
 
     // State 1: Scene Discovery
-    console.log(`Querying STAC API for AOI bbox:`, bbox, `datetime:`, datetime);
-    const scenes = await searchStacScenes({ bbox, datetime });
+    console.log(`Querying STAC API for AOI bbox:`, bbox, `datetime:`, datetime, `collections:`, collections);
+    const scenes = await searchStacScenes({ bbox, datetime, collections, limit: 20 });
 
     // State 2 & 3: Raster Asset Access & Download check
     let rasterInspectionResults: any[] = [];
@@ -72,16 +91,38 @@ export const createAnalysis = async (req: Request, res: Response) => {
 
     // State 5, 6, 7: AI Model Availability, Inference, and Flood Mask Generation
     const aiStatus = await checkAIModelAvailability();
-    const aiInferenceResult = await runAIInferencePipeline(primarySceneId, aoi);
+    // The worker expects a 3-band RGB/TCI COG. Do not pass an arbitrary single-band asset.
+    const primaryScene = scenes[0];
+    const assetEntries = Object.entries(primaryScene?.assets || {}) as Array<[string, any]>;
+    const rgbAsset = assetEntries.find(([key, asset]) =>
+      /^(visual|tci|true.?color|true.?colour)$/i.test(key) ||
+      (Array.isArray(asset?.roles) && asset.roles.some((role: string) => /visual|thumbnail/i.test(role)))
+    );
+    const assetHref = typeof rgbAsset?.[1]?.href === 'string' ? rgbAsset[1].href : undefined;
+    const aiInferenceResult = scenes.length > 0 && assetHref
+      ? await runAIInferencePipeline(primarySceneId, aoi, assetHref)
+      : {
+          aiModelAvailability: aiStatus.status === 'worker_offline' ? 'worker_offline' as const : 'not_downloaded' as const,
+          aiInference: 'skipped' as const,
+          floodMaskGeneration: 'skipped' as const,
+          confidenceScores: null,
+          floodAreaSqKm: null,
+          message: scenes.length === 0
+            ? 'AI inference skipped because no suitable satellite scene was discovered.'
+            : 'AI inference skipped: no compatible 3-band RGB/TCI asset was found in the selected scene.'
+        };
 
     // Phase 4: OSM Infrastructure Retrieval
     const osmFeatures = await fetchOSMInfrastructure(aoi);
     const floodMaskAvailable = aiInferenceResult.floodMaskGeneration === 'completed' && aiInferenceResult.floodAreaSqKm !== null;
 
+    // A valid mask alone does not establish impact; spatial feature-mask intersection must be performed.
     const infrastructureImpact = osmFeatures.map(f => ({
       ...f,
-      impactStatus: floodMaskAvailable ? 'POTENTIALLY AFFECTED' : 'FLOOD IMPACT UNAVAILABLE: NO VERIFIED FLOOD MASK',
-      reason: floodMaskAvailable ? 'Feature located within AOI flood proximity.' : 'No verified flood mask generated because AI model weights are missing.'
+      impactStatus: 'FLOOD IMPACT UNVERIFIED',
+      reason: floodMaskAvailable
+        ? 'A flood mask exists, but feature-to-mask spatial intersection is not implemented; no impact claim is made.'
+        : 'No verified flood mask is available for this analysis.'
     }));
 
     // Phase 5: Road Network Connectivity Analysis

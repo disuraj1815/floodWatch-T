@@ -31,41 +31,18 @@ export const analyzeRoadNetworkConnectivity = async (
   osmFeatures: OSMFeature[],
   floodMaskAvailable: boolean
 ): Promise<ConnectivityAnalysisResult> => {
-  const roadFeatures = osmFeatures.filter(f => f.type === 'Road Segment' || f.type === 'Bridge');
+  const roadFeatureCount = osmFeatures.filter(f => f.type === 'Road Segment' || f.type === 'Bridge').length;
 
-  const nodes: RoadGraphNode[] = roadFeatures.map((f, idx) => ({
-    id: `node_${idx}`,
-    lat: f.lat,
-    lng: f.lng
-  }));
-
-  const edges: RoadGraphEdge[] = roadFeatures.map((f, idx) => ({
-    id: `edge_${idx}`,
-    from: `node_${idx}`,
-    to: `node_${(idx + 1) % Math.max(1, roadFeatures.length)}`,
-    highwayType: f.tags.highway || 'unclassified',
-    name: f.name,
-    isPotentiallyAffected: false // requires flood mask intersection
-  }));
-
-  if (!floodMaskAvailable) {
-    return {
-      totalNodes: nodes.length,
-      totalEdges: edges.length,
-      floodMaskAvailable: false,
-      potentiallyCutOffSettlements: [],
-      status: 'unavailable_no_flood_mask',
-      message: 'Road network graph constructed from OSM features, but flood-dependent connectivity analysis is unavailable because no verified flood mask was generated (model weights missing).'
-    };
-  }
-
-  // If flood mask were available, spatial intersection logic would run here.
+  // OSM feature centroids alone do not contain road topology, so they cannot support a real graph.
+  // Do not fabricate edges by connecting unrelated features in array order.
   return {
-    totalNodes: nodes.length,
-    totalEdges: edges.length,
-    floodMaskAvailable: true,
+    totalNodes: 0,
+    totalEdges: 0,
+    floodMaskAvailable,
     potentiallyCutOffSettlements: [],
-    status: 'completed',
-    message: 'Road network graph analyzed against verified flood mask.'
+    status: 'unavailable_no_flood_mask',
+    message: floodMaskAvailable
+      ? `A flood mask is available, and ${roadFeatureCount} road/bridge features were retrieved, but road topology, mask intersection, and graph reachability are not implemented. No cut-off settlements are claimed.`
+      : `Retrieved ${roadFeatureCount} road/bridge features, but no verified flood mask is available. Road graph connectivity and potentially cut-off settlements are unavailable.`
   };
 };
